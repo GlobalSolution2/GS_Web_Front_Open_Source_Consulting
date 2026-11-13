@@ -1,0 +1,8 @@
+# Dependências instaladas
+node_modules/
+
+# Build gerado
+dist/
+
+# Configuração local do Supabase
+.env.local

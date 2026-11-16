@@ -2,21 +2,30 @@ import { useState } from 'react'
 import Icone from './Icone.jsx'
 
 // Permite incluir ou retirar a sala das listas.
-const SeletorListas = ({ sala, listas, onAdicionar, onRemover, onCriar, onFechar }) => {
+const SeletorListas = ({ sala, listas, onAdicionar, onRemover, onCriar, onFechar, bloqueado, carregando }) => {
   const [nome, setNome] = useState('')
   const [erro, setErro] = useState(null)
 
   // Cria uma lista e já inclui a sala selecionada.
-  const criar = (evento) => {
+  const criar = async (evento) => {
     evento.preventDefault()
-    const resposta = onCriar(nome)
+    setErro(null)
+    // A sala vai no mesmo pedido para não deixar uma criação pela metade.
+    const resposta = await onCriar(nome, sala.id)
     if (!resposta.ok) {
       setErro(resposta.erro)
       return
     }
-    onAdicionar(resposta.id, sala.id)
     setNome('')
     setErro(null)
+  }
+
+  // Aguarda a mudança da sala na lista e mostra possíveis erros.
+  const alternar = async (lista, marcada) => {
+    const resposta = marcada
+      ? await onRemover(lista.id, sala.id)
+      : await onAdicionar(lista.id, sala.id)
+    setErro(resposta.ok ? null : resposta.erro)
   }
 
   return (
@@ -47,7 +56,8 @@ const SeletorListas = ({ sala, listas, onAdicionar, onRemover, onCriar, onFechar
                   <input
                     type="checkbox"
                     checked={marcada}
-                    onChange={() => (marcada ? onRemover(lista.id, sala.id) : onAdicionar(lista.id, sala.id))}
+                    disabled={bloqueado}
+                    onChange={() => alternar(lista, marcada)}
                     className="size-4 accent-[var(--color-tinta)]"
                   />
                   {lista.name}
@@ -57,7 +67,9 @@ const SeletorListas = ({ sala, listas, onAdicionar, onRemover, onCriar, onFechar
           })}
         </ul>
       ) : (
-        <p className="mt-1 text-sm text-tinta-3">Você ainda não tem listas. Crie a primeira e esta sala já entra nela.</p>
+        <p className="mt-1 text-sm text-tinta-3">
+          {carregando ? 'Carregando listas...' : bloqueado ? 'Atualize as listas na seção Minhas listas para tentar novamente.' : 'Você ainda não tem listas. Crie a primeira e esta sala já entra nela.'}
+        </p>
       )}
 
       <form onSubmit={criar} className="mt-3 flex flex-wrap items-start gap-2">
@@ -67,6 +79,7 @@ const SeletorListas = ({ sala, listas, onAdicionar, onRemover, onCriar, onFechar
         <input
           id={`nova-lista-${sala.id}`}
           value={nome}
+          disabled={bloqueado}
           onChange={(evento) => setNome(evento.target.value)}
           placeholder="Nova lista, ex.: Grupo de quinta"
           maxLength={60}
@@ -76,6 +89,7 @@ const SeletorListas = ({ sala, listas, onAdicionar, onRemover, onCriar, onFechar
         />
         <button
           type="submit"
+          disabled={bloqueado}
           className="inline-flex h-9 items-center gap-1.5 rounded-md border border-regua-forte px-3 text-sm font-medium text-tinta hover:bg-placa-alta"
         >
           <Icone nome="mais" tamanho={15} />

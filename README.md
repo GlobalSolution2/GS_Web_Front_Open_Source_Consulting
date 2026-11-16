@@ -10,8 +10,8 @@ Global Solution 2026.2 | FIAP | Engenharia de Software, 1º ano | Front-end Desi
 | Cidade e bairro | São Paulo/SP |
 | Cidadão beneficiado | Estudantes universitários que querem escolher um ambiente adequado para estudar, trabalhar em grupo ou gravar vídeos/projetos. |
 | Problema em uma frase | Estudantes têm dificuldade para identificar, antes de se deslocar, salas com espaço e condições adequadas de ruído, temperatura e luminosidade para suas atividades. |
-| Como funciona | O fluxo da S01 (Sala 1) é ESP32 simulado no Wokwi → Supabase → painel React. A conexão local está configurada e a leitura pelo painel foi validada. S02 a S09 usam simulações locais. O painel oferece filtros, recomendações, favoritos e listas no navegador. |
-| O que cada parte faz | Edge: leitura simulada e decisão local (LEDs); Supabase: guarda o histórico da sala IoT; React/Web: exibição, filtros, rankings e CRUD local de listas.
+| Como funciona | O fluxo da S01 (Sala 1) é ESP32 simulado no Wokwi → Supabase → painel React. A conexão local está configurada e a leitura pelo painel foi validada. S02 a S09 usam simulações locais. O painel oferece filtros, recomendações, favoritos locais e listas compartilhadas no Supabase. |
+| O que cada parte faz | Edge: leitura simulada e decisão local (LEDs); Supabase: guarda o histórico da sala IoT e as listas compartilhadas; React/Web: exibição, filtros, rankings e CRUD de listas pela API.
 | Repositório | https://github.com/JeckyCossio/study-comfort (público) |
 | Indicador de impacto | Novas entrevistas com os usuários da plataforma, perguntando quanto tempo provavelmente foi economizado através do uso da plataforma, e quantas vezes por seman é usado a plataforma pelo usuário |
 | ODS conectados | ODS 4: Educação de Qualidade (principal: melhores condições para estudar); ODS 9: Indústria, Inovação e Infraestrutura (apoio: IoT aplicada à infraestrutura do campus); possivelmente ODS 11: Cidades e Comunidades Sustentáveis (uso eficiente de espaços coletivos). |
@@ -27,7 +27,7 @@ Global Solution 2026.2 | FIAP | Engenharia de Software, 1º ano | Front-end Desi
 
 ## Sobre a aplicação
 
-No Study Comfort, o estudante entra com uma matrícula e senha fictícias (login só demonstrativo, sem cadastro), vê as nove salas numa página só, com a ocupação total e por mesa, as mesas totalmente livres, a temperatura, a luminosidade e o ruído, e usa os atalhos *Estudar sozinho*, *Trabalho em grupo* e *Gravar vídeo/projeto* para ver o ranking das salas. Favoritos e listas ficam só no `localStorage` do navegador.
+No Study Comfort, o estudante entra com uma matrícula e senha fictícias (login só demonstrativo, sem cadastro), vê as nove salas numa página só, com a ocupação total e por mesa, as mesas totalmente livres, a temperatura, a luminosidade e o ruído, e usa os atalhos *Estudar sozinho*, *Trabalho em grupo* e *Gravar vídeo/projeto* para ver o ranking das salas. As listas ficam na tabela `listas` do Supabase e são compartilhadas por todos que usam o acesso padrão. Somente os favoritos ficam no `localStorage` do navegador.
 
 ### Origem dos dados
 
@@ -181,6 +181,63 @@ npm run dev                  # abre em http://localhost:5173
 | `VITE_SUPABASE_URL` | a URL do projeto Supabase |
 | `VITE_SUPABASE_PUBLISHABLE_KEY` | a chave publicável do Supabase (a aplicação recusa uma chave secreta) |
 
+## Listas usando Supabase
+
+O CRUD usa `fetch`, `async/await`, `useState`, `useEffect` e `try/catch/finally`.
+
+A tabela `public.listas` tem os seguintes campos:
+
+| Campo | Tipo | Regra |
+|---|---|---|
+| `id` | `bigint` | Chave primária gerada automaticamente pelo banco |
+| `name` | `text` | Obrigatório; o formulário valida até 40 caracteres |
+| `room_ids` | `text[]` | Obrigatório, com array vazio como padrão |
+
+O serviço `src/services/listasSupabase.js` usa a mesma URL e chave pública da telemetria. O hook `useColecoes` mantém os dados exibidos na tela. Os formulários aguardam a API antes de limpar os campos ou encerrar a edição.
+
+| Operação | Requisição |
+|---|---|
+| Consultar | `GET /rest/v1/listas?select=id,name,room_ids&order=id.asc` |
+| Criar | `POST /rest/v1/listas` com `name` e `room_ids` |
+| Renomear | `PATCH /rest/v1/listas?id=eq.ID` com `name` |
+| Incluir ou retirar sala | `PATCH /rest/v1/listas?id=eq.ID` com `room_ids` |
+| Excluir | `DELETE /rest/v1/listas?id=eq.ID` |
+
+“Criar e adicionar” envia a sala junto com o nome no mesmo POST. O ID vem da resposta do banco. As alterações usam `Prefer: return=representation` para confirmar que uma linha foi realmente criada, atualizada ou excluída.
+
+Enquanto um pedido está em andamento, os controles de alteração das listas ficam desabilitados. Se a API falhar, o conteúdo digitado e as últimas listas exibidas são preservados. Use **Atualizar listas** antes de repetir a alteração, pois uma falha de conexão pode acontecer depois de o banco ter recebido o pedido. Os pedidos têm um tempo máximo de espera por resposta de 15 segundos.
+
+As listas antigas do `localStorage` não são importadas nem usadas como alternativa quando a API falha. A atualização dos favoritos preserva esse armazenamento antigo. Para levar uma lista antiga ao banco, recrie-a pelo formulário.
+
+### Preparar outra instalação
+
+Além das variáveis de ambiente, crie a tabela no Supabase:
+
+```sql
+-- Cria a tabela usada pelo painel.
+create table public.listas (
+  id bigint generated by default as identity primary key,
+  name text not null,
+  room_ids text[] not null default '{}'::text[]
+);
+```
+
+O acesso usado pelo aplicativo é `anon`: o login demonstrativo não cria uma sessão no Supabase Auth. Esse papel precisa de `USAGE` no schema `public`, `SELECT`, `INSERT`, `UPDATE` e `DELETE` na tabela e das permissões necessárias para gerar o ID. O schema deve estar exposto na Data API. Se o RLS estiver ativado, também são necessárias políticas para as quatro operações. A demonstração atual usa RLS desativado e dados compartilhados; não armazene informações privadas nessas listas.
+
+### Conferir o CRUD pela interface
+
+1. Inicie com `npm run dev` e entre com o acesso padrão.
+2. Em **Minhas listas**, crie uma lista de teste e confira que ela aparece depois da resposta da API.
+3. Tente criar uma lista sem nome e outra com o mesmo nome. O formulário deve mostrar a validação.
+4. Renomeie a lista e adicione salas pelo botão de listas de cada sala.
+5. Recarregue a página. O nome e as salas devem continuar salvos.
+6. Abra outro navegador e entre com o mesmo acesso. As listas devem ser as mesmas; os favoritos continuam locais.
+7. Retire uma sala da lista. Use também **Criar e adicionar** em uma sala para conferir a criação com sala inicial.
+8. Exclua apenas a lista de teste, confirme e recarregue. Ela não deve reaparecer.
+9. Para conferir uma falha de conexão, desconecte a rede e tente criar uma lista com um nome de teste. O nome deve permanecer preenchido e a tela deve mostrar o erro. Reconecte e use **Atualizar listas** antes de repetir, verificando se a primeira tentativa chegou ao banco.
+
+Rode também `npm run lint` e `npm run build` para conferir o código e gerar o build.
+
 ## Estrutura
 
 ```text
@@ -192,7 +249,6 @@ npm run dev                  # abre em http://localhost:5173
 ├── vite.config.js
 ├── eslint.config.js
 ├── .env.example
-├── supabase/migrations/   migração para histórico único
 ├── public/                favicon e arquivos públicos
 └── src/                   aplicação compartilhada por Front-end e Web
     ├── App.jsx            alterna entre login e painel
@@ -207,8 +263,10 @@ npm run dev                  # abre em http://localhost:5173
     └── assets/            fontes locais e suas licenças
 ```
 
-## Limitações assumidas
+## Limitações
 
 - O login é fictício e só visual; não protege nada.
-- Listas e favoritos ficam no navegador: outro navegador ou perfil não os vê, e limpar os dados do site os apaga.
-- A chave publicável do Supabase ficará no navegador. A tabela usa RLS para permitir leitura e inserção somente da S01; a chave pública não pode editar/excluir o histórico nem definir o horário ou identificador da medição.
+- Favoritos ficam no navegador: outro navegador ou perfil não os vê, e limpar os dados do site os apaga.
+- As listas são compartilhadas, sem contas individuais nem sincronização automática entre telas.
+- Se duas pessoas alterarem as salas de uma lista ao mesmo tempo, a última gravação pode substituir a anterior.
+- A chave publicável fica no navegador.

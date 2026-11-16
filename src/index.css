@@ -65,6 +65,13 @@
     caret-color: var(--color-tinta);
   }
 
+  /* Indica os controles que aguardam uma resposta da API. */
+  button:disabled,
+  input:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
+
   :focus-visible {
     outline: 2px solid var(--color-tinta);
     outline-offset: 2px;

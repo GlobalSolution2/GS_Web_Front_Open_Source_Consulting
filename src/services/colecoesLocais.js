@@ -1,10 +1,10 @@
-// Salva listas e favoritos apenas no localStorage deste navegador.
+// Guarda favoritos locais e permite ler as preferências antigas.
 
 import { PREFERENCIAS_VAZIAS, formatoConhecido, sanearPreferencias } from '../utils/colecoes.js'
 
 export const CHAVE_PREFERENCIAS = 'citizentech_user_preferences_v1'
 
-const AVISO_LEITURA = 'Não foi possível ler suas listas salvas; começamos do zero.'
+const AVISO_LEITURA = 'Não foi possível ler seus favoritos salvos; começamos sem favoritos.'
 
 // Lê e valida as preferências salvas no navegador.
 export function lerPreferencias(armazenamento, idsValidos) {

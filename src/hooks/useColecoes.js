@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { SALAS } from '../data/salas.js'
-import * as regras from '../utils/colecoes.js'
+import { validarNomeLista } from '../utils/colecoes.js'
 import { CHAVE_PREFERENCIAS, lerPreferencias, salvarPreferencias } from '../services/colecoesLocais.js'
+import { lerConfiguracao } from '../services/configuracao.js'
+import { atualizarListaSupabase, buscarListasSupabase, criarListaSupabase, excluirListaSupabase } from '../services/listasSupabase.js'
 
 const IDS_DAS_SALAS = SALAS.map((sala) => sala.id)
 
@@ -14,108 +16,172 @@ function pegarLocalStorage() {
   }
 }
 
-// Usa um ID alternativo quando randomUUID não está disponível.
-function novoIdDeLista() {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID()
-  }
-  return `lista-${Date.now()}-${Math.random().toString(36).slice(2)}`
-}
-
-// Gerencia favoritos e listas usando as regras de colecoes.js.
+// Gerencia listas no Supabase e favoritos neste navegador.
 export function useColecoes() {
+  const [config] = useState(() => lerConfiguracao(import.meta.env))
   const [leitura] = useState(() => lerPreferencias(pegarLocalStorage(), IDS_DAS_SALAS))
-  const [prefs, setPrefs] = useState(leitura.prefs)
+  const [favoritos, setFavoritos] = useState(leitura.prefs.favorites)
+  const [listas, setListas] = useState([])
+  const [carregando, setCarregando] = useState(true)
+  const [carregou, setCarregou] = useState(false)
+  const [salvando, setSalvando] = useState(false)
+  const [erro, setErro] = useState(null)
+  const [busca, setBusca] = useState(0)
+  // Impede outro envio antes que o React desabilite os controles.
+  const gravando = useRef(false)
 
-  // A ref mantém as preferências atuais entre ações feitas antes do próximo render.
-  const maisNova = useRef(leitura.prefs)
-
-  // Atualiza a referência e o estado com as novas preferências.
-  const aplicar = (novas) => {
-    maisNova.current = novas
-    setPrefs(novas)
-  }
-
-  // Só grava após uma alteração, preservando os dados salvos na abertura.
   useEffect(() => {
-    if (prefs === leitura.prefs) {
-      return
+    let ativo = true
+
+    // Carrega as listas sem usar os dados locais como alternativa.
+    async function carregar() {
+      setCarregando(true)
+      setErro(null)
+      try {
+        const recebidas = await buscarListasSupabase(config)
+        if (ativo) {
+          setListas(recebidas)
+          setCarregou(true)
+        }
+      } catch (falha) {
+        if (ativo) {
+          setErro(falha.message)
+          setCarregou(false)
+        }
+      } finally {
+        if (ativo) setCarregando(false)
+      }
     }
-    salvarPreferencias(pegarLocalStorage(), prefs)
-  }, [prefs, leitura.prefs])
 
-  // Sincroniza as listas e os favoritos entre abas.
+    carregar()
+    return () => { ativo = false }
+  }, [config, busca])
+
+  // Grava só os favoritos, preservando as listas locais antigas.
   useEffect(() => {
-    // Carrega as preferências alteradas em outra aba.
+    if (favoritos === leitura.prefs.favorites) return
+    const armazenamento = pegarLocalStorage()
+    const anteriores = lerPreferencias(armazenamento, IDS_DAS_SALAS)
+    salvarPreferencias(armazenamento, { ...anteriores.prefs, favorites: favoritos })
+  }, [favoritos, leitura.prefs.favorites])
+
+  // Sincroniza apenas os favoritos entre abas do navegador.
+  useEffect(() => {
+    // Lê os favoritos alterados em outra aba.
     const quandoOutraAbaGravar = (evento) => {
-      if (evento.key !== CHAVE_PREFERENCIAS && evento.key !== null) {
-        return
-      }
+      if (evento.key !== CHAVE_PREFERENCIAS && evento.key !== null) return
       const lida = lerPreferencias(pegarLocalStorage(), IDS_DAS_SALAS)
-      if (lida.aviso !== null) {
-        return
-      }
-      maisNova.current = lida.prefs
-      setPrefs(lida.prefs)
+      if (lida.aviso === null) setFavoritos(lida.prefs.favorites)
     }
     window.addEventListener('storage', quandoOutraAbaGravar)
     return () => window.removeEventListener('storage', quandoOutraAbaGravar)
   }, [])
 
+  // Busca novamente as listas compartilhadas.
+  const atualizarListas = () => {
+    if (!gravando.current && !carregando) setBusca((anterior) => anterior + 1)
+  }
+
   // Confere se a sala está nos favoritos.
-  const ehFavorita = (salaId) => prefs.favorites.includes(salaId)
+  const ehFavorita = (salaId) => favoritos.includes(salaId)
 
-  // Adiciona ou retira a sala dos favoritos.
+  // Adiciona ou retira o favorito local.
   const alternarFavorito = (salaId) => {
-    aplicar(regras.alternarFavorito(maisNova.current, salaId))
+    setFavoritos((atuais) => atuais.includes(salaId)
+      ? atuais.filter((id) => id !== salaId)
+      : [...atuais, salaId])
   }
 
-  // Valida o nome e cria uma lista vazia.
-  const criarLista = (nome) => {
-    const id = novoIdDeLista()
-    const resultado = regras.criarLista(maisNova.current, nome, id)
-    if (resultado.erro !== null) {
-      return { ok: false, erro: resultado.erro, id: null }
+  // Libera um único pedido quando as listas já foram carregadas.
+  const iniciarGravacao = () => {
+    if (gravando.current || carregando || !carregou) return false
+    gravando.current = true
+    setSalvando(true)
+    setErro(null)
+    return true
+  }
+
+  // Cria uma lista vazia ou já com a sala selecionada.
+  const criarLista = async (nome, salaId = null) => {
+    const validacao = validarNomeLista({ lists: listas }, nome)
+    if (!validacao.ok) return { ok: false, erro: validacao.erro }
+    if (!iniciarGravacao()) return { ok: false, erro: 'Aguarde o pedido atual ou atualize as listas.' }
+    try {
+      const salas = IDS_DAS_SALAS.includes(salaId) ? [salaId] : []
+      const criada = await criarListaSupabase(config, validacao.nome, salas)
+      setListas((atuais) => [...atuais, criada])
+      return { ok: true, erro: null, id: criada.id }
+    } catch (falha) {
+      setErro(falha.message)
+      setCarregou(false)
+      return { ok: false, erro: falha.message }
+    } finally {
+      gravando.current = false
+      setSalvando(false)
     }
-    aplicar(resultado.prefs)
-    return { ok: true, erro: null, id }
   }
 
-  // Valida o novo nome e atualiza a lista.
-  const renomearLista = (listaId, nome) => {
-    const resultado = regras.renomearLista(maisNova.current, listaId, nome)
-    if (resultado.erro !== null) {
-      return { ok: false, erro: resultado.erro }
+  // Salva os campos da lista e só depois atualiza a tela.
+  const salvarLista = async (listaId, dados) => {
+    if (!iniciarGravacao()) return { ok: false, erro: 'Aguarde o pedido atual ou atualize as listas.' }
+    try {
+      const salva = await atualizarListaSupabase(config, listaId, dados)
+      setListas((atuais) => atuais.map((lista) => lista.id === listaId ? salva : lista))
+      return { ok: true, erro: null }
+    } catch (falha) {
+      setErro(falha.message)
+      setCarregou(false)
+      return { ok: false, erro: falha.message }
+    } finally {
+      gravando.current = false
+      setSalvando(false)
     }
-    aplicar(resultado.prefs)
-    return { ok: true, erro: null }
   }
 
-  // Remove a lista e mantém os favoritos.
-  const excluirLista = (listaId) => {
-    aplicar(regras.excluirLista(maisNova.current, listaId))
+  // Valida o novo nome antes de enviá-lo ao banco.
+  const renomearLista = async (listaId, nome) => {
+    const validacao = validarNomeLista({ lists: listas }, nome, listaId)
+    if (!validacao.ok) return { ok: false, erro: validacao.erro }
+    return salvarLista(listaId, { name: validacao.nome })
   }
 
-  // Inclui a sala na lista escolhida.
-  const adicionarSala = (listaId, salaId) => {
-    aplicar(regras.adicionarSalaNaLista(maisNova.current, listaId, salaId))
+  // Exclui a lista no banco antes de retirá-la da tela.
+  const excluirLista = async (listaId) => {
+    if (!iniciarGravacao()) return { ok: false, erro: 'Aguarde o pedido atual ou atualize as listas.' }
+    try {
+      await excluirListaSupabase(config, listaId)
+      setListas((atuais) => atuais.filter((lista) => lista.id !== listaId))
+      return { ok: true, erro: null }
+    } catch (falha) {
+      setErro(falha.message)
+      setCarregou(false)
+      return { ok: false, erro: falha.message }
+    } finally {
+      gravando.current = false
+      setSalvando(false)
+    }
   }
 
-  // Retira a sala da lista escolhida.
-  const removerSala = (listaId, salaId) => {
-    aplicar(regras.removerSalaDaLista(maisNova.current, listaId, salaId))
+  // Inclui a sala sem repetir seu ID na lista.
+  const adicionarSala = async (listaId, salaId) => {
+    const lista = listas.find((item) => item.id === listaId)
+    if (!lista || !IDS_DAS_SALAS.includes(salaId)) return { ok: false, erro: 'Lista ou sala não encontrada.' }
+    const salas = lista.room_ids.includes(salaId) ? lista.room_ids : [...lista.room_ids, salaId]
+    return salvarLista(listaId, { room_ids: salas })
+  }
+
+  // Retira a sala da lista compartilhada.
+  const removerSala = async (listaId, salaId) => {
+    const lista = listas.find((item) => item.id === listaId)
+    if (!lista) return { ok: false, erro: 'Lista não encontrada.' }
+    return salvarLista(listaId, { room_ids: lista.room_ids.filter((id) => id !== salaId) })
   }
 
   return {
-    favoritos: prefs.favorites,
-    listas: prefs.lists,
+    favoritos, listas, carregando, salvando, erro,
+    bloqueado: carregando || salvando || !carregou,
     aviso: leitura.aviso,
-    ehFavorita,
-    alternarFavorito,
-    criarLista,
-    renomearLista,
-    excluirLista,
-    adicionarSala,
-    removerSala,
+    atualizarListas, ehFavorita, alternarFavorito, criarLista,
+    renomearLista, excluirLista, adicionarSala, removerSala,
   }
 }

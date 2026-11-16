@@ -1,4 +1,3 @@
-// Aplica as verificações de JavaScript e React, ignorando o build.
 import js from '@eslint/js'
 import globals from 'globals'
 import reactHooks from 'eslint-plugin-react-hooks'

@@ -1,4 +1,3 @@
-// Monta a aplicação no elemento root com as verificações do StrictMode.
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 

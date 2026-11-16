@@ -48,6 +48,8 @@ const LinhaSala = ({
   onAdicionarNaLista,
   onRemoverDaLista,
   onCriarLista,
+  listasBloqueadas,
+  listasCarregando,
   erroApi,
 }) => {
   const [mostrarListas, setMostrarListas] = useState(false)
@@ -190,6 +192,8 @@ const LinhaSala = ({
             onAdicionar={onAdicionarNaLista}
             onRemover={onRemoverDaLista}
             onCriar={onCriarLista}
+            bloqueado={listasBloqueadas}
+            carregando={listasCarregando}
             onFechar={() => setMostrarListas(false)}
           />
         </div>

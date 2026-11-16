@@ -25,6 +25,8 @@ const QuadroSalas = ({ itens, atividade, nomeAtividade, versaoOrdem, colecoes, e
       onAdicionarNaLista={colecoes.adicionarSala}
       onRemoverDaLista={colecoes.removerSala}
       onCriarLista={colecoes.criarLista}
+      listasBloqueadas={colecoes.bloqueado}
+      listasCarregando={colecoes.carregando}
       erroApi={item.sala.id === 'S01' ? erroApi : null}
     />
   )

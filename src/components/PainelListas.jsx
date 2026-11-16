@@ -3,10 +3,11 @@ import Icone from './Icone.jsx'
 import { contar } from '../utils/formatar.js'
 
 // Exibe uma ação com texto e ícone.
-const BotaoAcao = ({ icone, children, onClick, perigo = false }) => (
+const BotaoAcao = ({ icone, children, onClick, perigo = false, bloqueado = false }) => (
   <button
     type="button"
     onClick={onClick}
+    disabled={bloqueado}
     className={`inline-flex h-9 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium transition-colors duration-150 ${
       perigo ? 'text-critico hover:bg-critico/10' : 'text-tinta-2 hover:bg-placa-alta hover:text-tinta'
     }`}
@@ -17,16 +18,17 @@ const BotaoAcao = ({ icone, children, onClick, perigo = false }) => (
 )
 
 // Exibe as salas da lista e permite renomear ou excluir.
-const CartaoLista = ({ lista, nomes, onRenomear, onExcluir, onRemoverSala }) => {
+const CartaoLista = ({ lista, nomes, onRenomear, onExcluir, onRemoverSala, bloqueado }) => {
   const [editando, setEditando] = useState(false)
   const [nome, setNome] = useState(lista.name)
   const [erro, setErro] = useState(null)
   const [confirmando, setConfirmando] = useState(false)
 
   // Valida e salva o novo nome da lista.
-  const salvar = (evento) => {
+  const salvar = async (evento) => {
     evento.preventDefault()
-    const resposta = onRenomear(lista.id, nome)
+    setErro(null)
+    const resposta = await onRenomear(lista.id, nome)
     if (!resposta.ok) {
       setErro(resposta.erro)
       return
@@ -52,6 +54,7 @@ const CartaoLista = ({ lista, nomes, onRenomear, onExcluir, onRemoverSala }) => 
           <input
             id={`renomear-${lista.id}`}
             value={nome}
+            disabled={bloqueado}
             onChange={(evento) => setNome(evento.target.value)}
             maxLength={60}
             autoFocus
@@ -59,7 +62,7 @@ const CartaoLista = ({ lista, nomes, onRenomear, onExcluir, onRemoverSala }) => 
             aria-describedby={erro ? `erro-renomear-${lista.id}` : undefined}
             className="h-9 min-w-0 flex-1 rounded-md border border-regua bg-noite px-2.5 text-sm text-tinta focus:border-tinta-2"
           />
-          <button type="submit" className="h-9 rounded-md bg-tinta px-3 text-sm font-semibold text-noite hover:bg-tinta-2">
+          <button type="submit" disabled={bloqueado} className="h-9 rounded-md bg-tinta px-3 text-sm font-semibold text-noite hover:bg-tinta-2">
             Salvar
           </button>
           <button type="button" onClick={cancelar} className="h-9 rounded-md px-3 text-sm text-tinta-2 hover:text-tinta">
@@ -79,10 +82,10 @@ const CartaoLista = ({ lista, nomes, onRenomear, onExcluir, onRemoverSala }) => 
           </h3>
           {!confirmando && (
             <div className="flex">
-              <BotaoAcao icone="lapis" onClick={() => setEditando(true)}>
+              <BotaoAcao icone="lapis" bloqueado={bloqueado} onClick={() => { setNome(lista.name); setEditando(true) }}>
                 Renomear
               </BotaoAcao>
-              <BotaoAcao icone="lixeira" perigo onClick={() => setConfirmando(true)}>
+              <BotaoAcao icone="lixeira" perigo bloqueado={bloqueado} onClick={() => setConfirmando(true)}>
                 Excluir
               </BotaoAcao>
             </div>
@@ -96,6 +99,7 @@ const CartaoLista = ({ lista, nomes, onRenomear, onExcluir, onRemoverSala }) => 
           <button
             type="button"
             onClick={() => onExcluir(lista.id)}
+            disabled={bloqueado}
             className="h-9 rounded-md bg-critico px-3 text-sm font-semibold text-noite hover:bg-critico/90"
           >
             Excluir lista
@@ -115,6 +119,7 @@ const CartaoLista = ({ lista, nomes, onRenomear, onExcluir, onRemoverSala }) => 
               <button
                 type="button"
                 onClick={() => onRemoverSala(lista.id, salaId)}
+                disabled={bloqueado}
                 aria-label={`Tirar a ${salaId} da lista ${lista.name}`}
                 className="grid size-7 place-items-center rounded text-tinta-3 hover:bg-placa-alta hover:text-tinta"
               >
@@ -130,7 +135,7 @@ const CartaoLista = ({ lista, nomes, onRenomear, onExcluir, onRemoverSala }) => 
   )
 }
 
-// Reúne favoritos e listas salvos neste navegador.
+// Reúne os favoritos locais e as listas compartilhadas.
 const PainelListas = ({ colecoes, salas }) => {
   const [nome, setNome] = useState('')
   const [erro, setErro] = useState(null)
@@ -140,9 +145,10 @@ const PainelListas = ({ colecoes, salas }) => {
   }
 
   // Cria a lista e limpa o formulário quando o nome é aceito.
-  const criar = (evento) => {
+  const criar = async (evento) => {
     evento.preventDefault()
-    const resposta = colecoes.criarLista(nome)
+    setErro(null)
+    const resposta = await colecoes.criarLista(nome)
     if (!resposta.ok) {
       setErro(resposta.erro)
       return
@@ -152,13 +158,31 @@ const PainelListas = ({ colecoes, salas }) => {
   }
 
   return (
-    <section id="minhas-listas" aria-labelledby="titulo-listas" className="scroll-mt-4 rounded-lg border border-regua bg-moldura p-4 sm:p-5">
+    <section id="minhas-listas" aria-labelledby="titulo-listas" aria-busy={colecoes.carregando || colecoes.salvando} className="scroll-mt-4 rounded-lg border border-regua bg-moldura p-4 sm:p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 id="titulo-listas" className="font-painel text-2xl font-bold uppercase tracking-[0.04em] text-tinta">
           Minhas listas
         </h2>
-        <p className="text-sm text-tinta-3">Salvas só neste navegador. Outro navegador ou perfil não vê.</p>
+        <p className="text-sm text-tinta-3">Listas compartilhadas, salvas no Supabase. Favoritos só neste navegador.</p>
       </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={colecoes.atualizarListas}
+          disabled={colecoes.carregando || colecoes.salvando}
+          className="h-10 rounded-md border border-regua px-3 text-sm text-tinta hover:bg-placa"
+        >
+          Atualizar listas
+        </button>
+        <p role="status" className="text-sm text-tinta-2">
+          {colecoes.carregando ? 'Carregando listas...' : colecoes.salvando ? 'Salvando alteração...' : ''}
+        </p>
+      </div>
+
+      {colecoes.erro && (
+        <p role="alert" className="mt-3 text-sm text-critico">{colecoes.erro}</p>
+      )}
 
       {colecoes.aviso && (
         <p role="status" className="mt-3 inline-flex items-center gap-1.5 text-sm text-atencao">
@@ -201,6 +225,7 @@ const PainelListas = ({ colecoes, salas }) => {
         <input
           id="nome-nova-lista"
           value={nome}
+          disabled={colecoes.bloqueado}
           onChange={(evento) => setNome(evento.target.value)}
           placeholder="Ex.: Para gravar o vídeo"
           maxLength={60}
@@ -210,6 +235,7 @@ const PainelListas = ({ colecoes, salas }) => {
         />
         <button
           type="submit"
+          disabled={colecoes.bloqueado}
           className="inline-flex h-10 items-center gap-1.5 rounded-md bg-tinta px-4 text-sm font-semibold text-noite hover:bg-tinta-2"
         >
           <Icone nome="mais" tamanho={16} />
@@ -232,14 +258,15 @@ const PainelListas = ({ colecoes, salas }) => {
               onRenomear={colecoes.renomearLista}
               onExcluir={colecoes.excluirLista}
               onRemoverSala={colecoes.removerSala}
+              bloqueado={colecoes.bloqueado}
             />
           ))}
         </ul>
-      ) : (
+      ) : !colecoes.carregando && !colecoes.erro ? (
         <p className="mt-3 text-sm text-tinta-3">
           Junte salas para cada situação, como “Grupo de quinta” ou “Silêncio para prova”. Crie a lista aqui ou direto numa sala.
         </p>
-      )}
+      ) : null}
     </section>
   )
 }
